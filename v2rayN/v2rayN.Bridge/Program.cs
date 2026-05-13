@@ -1,104 +1,87 @@
-﻿using System.Text.Json;
-using ServiceLib.Handler;
-using ServiceLib.Handler.Fmt;
-using ServiceLib.Models;
+﻿using System.Reflection;
+using v2rayN.Bridge.Commands;
 
-if (args.Length < 2)
+if (args.Length < 1)
 {
-    Console.WriteLine("Usage: v2rayN.Bridge <command> <argument>");
-    Console.WriteLine("Commands: to-uri, parse-sub, to-json");
+    PrintUsage();
     return;
 }
 
 string command = args[0];
-string argument = args[1];
+string[] commandArgs = args.Length > 1 ? args[1..] : [];
 
-switch (command)
+// Discover all command handlers at startup
+var handlers = LoadCommandHandlers();
+
+if (command == "--help" || command == "-h" || command == "help")
 {
-    case "to-json":
-        ToJson(argument);
-        break;
-    case "parse-sub":
-        ParseSub(argument);
-        break;
-    case "to-uri":
-        ToUri(argument);
-        break;
-    default:
-        Console.WriteLine("Unknown command");
-        break;
+    if (commandArgs.Length > 0)
+    {
+        // Show help for specific command
+        PrintCommandHelp(handlers, commandArgs[0]);
+    }
+    else { PrintUsage(handlers); }
+    return;
 }
 
-static void ToJson(string shareLink)
+if (!handlers.TryGetValue(command, out var handler))
 {
-    string msg;
-    var item = FmtHandler.ResolveConfig(shareLink, out msg);
+    Console.WriteLine($"Unknown command: {command}");
+    PrintUsage(handlers);
+    return;
+}
 
-    if (item != null)
+// Execute the selected command with its arguments
+try { handler.Execute(commandArgs); }
+catch (Exception ex)
+{
+    Console.WriteLine($"ERROR: Command execution failed: {ex.Message}");
+    Console.WriteLine($"Usage: {handler.HelpText}");
+}
+
+// =============================================
+// Helper methods
+// =============================================
+
+static Dictionary<string, ICommandHandler> LoadCommandHandlers()
+{
+    return Assembly.GetExecutingAssembly()
+        .GetTypes()
+        .Where(t => typeof(ICommandHandler).IsAssignableFrom(t)
+                    && !t.IsInterface
+                    && !t.IsAbstract)
+        .Select(t => (ICommandHandler)Activator.CreateInstance(t)!)
+        .ToDictionary(h => h.CommandName, StringComparer.OrdinalIgnoreCase);
+}
+
+static void PrintUsage(Dictionary<string, ICommandHandler>? handlers = null)
+{
+    handlers ??= LoadCommandHandlers();
+
+    Console.WriteLine("v2rayN.Bridge - Convert and parse v2rayN share links");
+    Console.WriteLine();
+    Console.WriteLine("Usage: v2rayN.Bridge <command> [arguments...]");
+    Console.WriteLine("       v2rayN.Bridge help <command>  - Show help for specific command");
+    Console.WriteLine();
+    Console.WriteLine("Available commands:");
+
+    // Print all commands with their help text
+    foreach (var cmd in handlers.Values.OrderBy(c => c.CommandName)) { Console.WriteLine($"  {cmd.HelpText}"); }
+}
+
+static void PrintCommandHelp(Dictionary<string, ICommandHandler> handlers, string commandName)
+{
+    if (handlers.TryGetValue(commandName, out var handler))
     {
-        var json = JsonSerializer.Serialize(
-            item,
-            new JsonSerializerOptions { WriteIndented = true }
-        );
-        Console.WriteLine(json);
+        Console.WriteLine($"Help for '{commandName}':");
+        Console.WriteLine($"  {handler.HelpText}");
+
+        // If the command supports it, you could add more detailed help
+        // by adding an optional GetDetailedHelp() method to the interface
     }
     else
     {
-        Console.WriteLine($"ERROR: {msg}");
-    }
-}
-
-static void ParseSub(string configText)
-{
-    // For parsing subscription content or config text
-    // Split by newlines and parse each line as a potential link
-    string msg;
-    var lines = configText.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
-    var items = new List<ProfileItem>();
-
-    foreach (var line in lines)
-    {
-        var trimmed = line.Trim();
-        if (!string.IsNullOrEmpty(trimmed))
-        {
-            var item = FmtHandler.ResolveConfig(trimmed, out msg);
-            if (item != null)
-            {
-                items.Add(item);
-            }
-        }
-    }
-
-    var json = JsonSerializer.Serialize(
-        items,
-        new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        }
-    );
-    Console.WriteLine(json);
-}
-
-static void ToUri(string jsonItem)
-{
-    try
-    {
-        var options = new JsonSerializerOptions();
-        var item = JsonSerializer.Deserialize<ProfileItem>(jsonItem, options);
-
-        if (item != null)
-        {
-            var uri = FmtHandler.GetShareUri(item);
-            Console.WriteLine(uri ?? "Failed to generate URI");
-        }
-        else
-        {
-            Console.WriteLine("ERROR: Invalid ProfileItem JSON");
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"ERROR: {ex.Message}");
+        Console.WriteLine($"Unknown command: {commandName}");
+        PrintUsage(handlers);
     }
 }
