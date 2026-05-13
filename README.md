@@ -1,6 +1,8 @@
+_This is a forked repo from [the original v2rayN repository](https://github.com/2dust/v2rayN). To review the additional features of this fork, see [the Bridge](v2rayN/v2rayN.Bridge/README.md)_.
+
 # v2rayN
 
-A GUI client for Windows, Linux and macOS, support [Xray](https://github.com/XTLS/Xray-core)
+A GUI client for Windows, Linux and macOS, which supports [Xray](https://github.com/XTLS/Xray-core)
 and [sing-box](https://github.com/SagerNet/sing-box)
 and [others](https://github.com/2dust/v2rayN/wiki/List-of-supported-cores)
 
@@ -16,3 +18,4 @@ Read the [Wiki](https://github.com/2dust/v2rayN/wiki) for details.
 ## Telegram Channel
 
 [github_2dust](https://t.me/github_2dust)
+

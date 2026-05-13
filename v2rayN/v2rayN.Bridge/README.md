@@ -1,3 +1,16 @@
+## ⚠️ Security Notice
+
+This tool is **NOT affiliated with the official v2rayN project**.
+
+**Critical safety rules:**
+
+- **Never run this tool with `sudo` or administrator privileges.** It only parses strings and outputs JSON — it does not need and must never receive elevated permissions.
+- **Do not pipe untrusted input into this tool from privileged contexts.** If you embed the bridge in scripts, ensure those scripts run with normal user rights.
+- **This tool processes arbitrary input (share links, subscription text, JSON).** While it uses the same parsing logic as v2rayN, any software that deserializes external data carries inherent risk. Use at your own discretion.
+- **This is a standalone utility**, distributed separately from v2rayN. It has not been reviewed or endorsed by the v2rayN maintainers.
+
+If you need system proxy configuration, firewall changes, or network interface modifications, use the official v2rayN application directly — not this bridge.
+
 # v2rayN.Bridge
 
 A lightweight CLI that exposes [v2rayN](https://github.com/2dust/v2rayN)'s battle-tested
@@ -137,3 +150,4 @@ if __name__ == "__main__":
 ## License
 
 Same as v2rayN – [GPL-3.0](https://github.com/2dust/v2rayN/blob/master/LICENSE).
+
