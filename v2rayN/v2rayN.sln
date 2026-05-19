@@ -36,6 +36,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ServiceLib.Tests", "Service
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ServiceLib.UdpTest", "ServiceLib.UdpTest\ServiceLib.UdpTest.csproj", "{CE9D9298-0289-4718-2522-B236489F2912}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NoGui", "NoGui\NoGui.csproj", "{53B32E83-541E-4EB8-A3A6-14AB10BF2CC7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
