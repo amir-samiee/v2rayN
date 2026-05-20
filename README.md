@@ -1,3 +1,8 @@
+> *This is a fork, originally from [v2rayN](https://github.com/2dust/v2rayN).*
+> 
+> *See [NoGui](v2rayN/NoGui/README.md) for this fork's extensions.*
+----------
+
 # v2rayN
 
 A GUI client for Windows, Linux and macOS, support [Xray](https://github.com/XTLS/Xray-core)
