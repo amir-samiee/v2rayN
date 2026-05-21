@@ -1,15 +1,3 @@
-using ServiceLib.Handler.SysProxy;
-using ServiceLib.Handler.Builder;
-using ServiceLib.Handler.Fmt;
-using ServiceLib.Services;
-using ServiceLib.Handler;
-using ServiceLib.Manager;
-using ServiceLib.Common;
-using ServiceLib.Helper;
-using ServiceLib.Models;
-using ServiceLib.Enums;
-using ServiceLib.Resx;
-using NLog;
 namespace NoGui;
 
 internal class Subprogram {
@@ -32,20 +20,12 @@ internal class Subprogram {
         // Spawns StatisticsXrayService  (polls http://127.0.0.1:{StatePort}/debug/vars)
         // and StatisticsSingboxService  (WebSocket ws://127.0.0.1:{StatePort2}/traffic)
         // both on 1-second background loops.
-        updateFunc ??= update => {
-            Console.Write($"[stats]   proxy: ↑ {update.ProxyUp} KB/s ↓ {update.ProxyDown} KB/s");
-            Console.Write($"  |  direct: ↑ {update.DirectUp} KB/s ↓ {update.DirectDown} KB/s\r");
-            return Task.CompletedTask;
-        };
-        await StatisticsManager.Instance.Init(Config, updateFunc);
+        await StatisticsManager.Instance.Init(Config, updateFunc ?? (async (a) => { }));
     }
-    private static async Task InitCoreManager() {
+    private static async Task InitCoreManager(Func<bool, string, Task>? updateFunc = null) {
         // 3. Init CoreManager
         // Sets up chmod on non-Windows; stores the update callback.
-        await CoreManager.Instance.Init(Config, (_, msg) => {
-            Console.WriteLine($"[core] {msg.TrimEnd()} [/core]");
-            return Task.CompletedTask;
-        });
+        await CoreManager.Instance.Init(Config, updateFunc ?? (async (a, b) => { }));
     }
     private static async Task<CoreConfigContextBuilderAllResult> BuildContext() {
         // 7. Resolve the active ProfileItem
@@ -64,13 +44,13 @@ internal class Subprogram {
             allResult.PreSocksResult?.Context);
         await SysProxyHandler.UpdateSysProxy(Config, false);
     }
-    public static async Task Start(bool enableStats = true, Func<ServerSpeedItem, Task>? updateFunc = null) {
+    public static async Task Start(bool enableStats = true, Func<ServerSpeedItem, Task>? statUpdater = null, Func<bool, string, Task>? coreLogUpdater = null) {
         try {
             await InitApp(enableStats);
-            await InitCoreManager();
+            await InitCoreManager(coreLogUpdater);
             await InitFinal();
-            await Task.Delay(3000); // Core loading...
-            if (enableStats) { await InitStatistics(updateFunc); }
+            await Task.Delay(3000); // Core starting up...
+            if (enableStats) { await InitStatistics(statUpdater); }
         }
         catch { await Stop(); throw; }
     }
@@ -79,12 +59,12 @@ internal class Subprogram {
         await AppManager.Instance.AppExitAsync(true);
     }
 }
-public class ApiManager {
-    protected static Config Config
+public class APIManager {
+    public static Config Config
     // not returning AppManager.Instance.Config to prevent any potential bug-leading 
     // conflicts; though they ultimately reference the same object either way
     => Subprogram.Config;
-    public static async Task Start(bool enableStats = true, Func<ServerSpeedItem, Task>? updateFunc = null) { await Subprogram.Start(enableStats, updateFunc); }
+    public static async Task Start(bool enableStats = true, Func<ServerSpeedItem, Task>? statUpdater = null, Func<bool, string, Task>? coreLogUpdater = null) { await Subprogram.Start(enableStats, statUpdater, coreLogUpdater); }
     public static async Task Stop() { await Subprogram.Stop(); }
     public static async Task ActivateProfile(string profileId) {
         // 6. Profile activation
@@ -102,30 +82,20 @@ public class ApiManager {
         }
         Config.SystemProxyItem.SysProxyType = system_proxy_config;
     }
-    public static async Task RunTest(ESpeedActionType action, List<string> profileIds) {
-        var profiles = SQLiteHelper.Instance.TableAsync<ProfileItem>().Where(p => profileIds.Contains(p.IndexId));
-        await RunTest(action, await profiles.ToListAsync());
+    public static async Task<SpeedtestService> RunTest(ESpeedActionType action, string? subid) {
+        var profiles = await AppManager.Instance.ProfileItems(subid ?? string.Empty);
+        return await RunTest(action, profiles);
     }
-    public static async Task RunTest(ESpeedActionType action, List<ProfileItem>? profiles = null) {
+    public static async Task<SpeedtestService> RunTest(ESpeedActionType action, List<string> profileIds) {
+        var profiles = SQLiteHelper.Instance.TableAsync<ProfileItem>().Where(p => profileIds.Contains(p.IndexId));
+        return await RunTest(action, await profiles.ToListAsync());
+    }
+    public static async Task<SpeedtestService> RunTest(ESpeedActionType action, List<ProfileItem>? profiles = null, Func<SpeedTestResult, Task>? updateFunc = null) {
         // 4.5. Run tests (e.g. tcping) on given profiles (null -> all profiles)
-        var Done = false;
-        async Task TestResFunc(SpeedTestResult result) {
-            var terminations = new List<string?> { ResUI.SpeedtestingCompleted, ResUI.SpeedtestingStop };
-            if (terminations.Contains(result.Delay)) { Done = true; }
-            Console.WriteLine($"{result.IndexId}: {result.Delay}");
-        }
-        var sts = new SpeedtestService(Config, TestResFunc);
+        var sts = new SpeedtestService(Config, updateFunc ?? (async (a) => { }));
         profiles ??= await SQLiteHelper.Instance.TableAsync<ProfileItem>().ToListAsync();
         sts.RunLoop(action, profiles);
-        var i = 0;
-        while (!Done && i < 400) {
-            Console.Write($"{++i}\r");
-            await Task.Delay(1000);
-        }
-        if (i == 400) {
-            Console.WriteLine("test operation completion timed out");
-            sts.ExitLoop();
-        }
+        return sts;
     }
     public static async Task AddSubFromUrl(string url) {
         await ConfigHandler.AddSubItem(Config, url);
@@ -151,52 +121,7 @@ public class ApiManager {
         return await ConfigHandler.AddBatchServers(Config, content, string.Empty, false);
     }
     public static async Task<int> AddServersFromFile(string filename) {
-        var content = File.ReadAllText(filename);
-        return await AddServersFromText(content);
-    }
-}
-internal class Etc {
-    private static async Task Main() {
-        Console.WriteLine("App Started");
-        try {
-            InitLogging();
-            await ApiManager.Start();
-            await ApiManager.SetProxyMode(ESysProxyType.ForcedChange);
-            await ApiManager.RunTest(ESpeedActionType.Tcping, await SomeProfileIds(4));
-            await ApiManager.ActivateProfile(await SomeProfileId());
-            await WaitForAWhile();
-        }
-        catch (Exception exc) { Console.WriteLine(exc.Message); }
-        finally { await ApiManager.Stop(); }
-    }
-    public static async Task<ConsoleKeyInfo?> WaitForAWhile(int? delay = null) {
-        // 10. Wait
-        Console.WriteLine($"Active: {(await Subprogram.Profile)?.Remarks}");
-        if (delay is null) {
-            Console.Write("press any key to quit: ");
-            var Key = Console.ReadKey(intercept: true);
-            return Key;
-        }
-        else { await Task.Delay((int)delay); return null; }
-    }
-    public static async Task<List<string>> SomeProfileIds(int? n = null) {
-        var profiles = SQLiteHelper.Instance.TableAsync<ProfileItem>();
-        if (n is not null) { profiles = profiles.Take((int)n); }
-        return (await profiles.ToListAsync()).Select(p => p.IndexId).ToList();
-    }
-    public static async Task<string> SomeProfileId() {
-        // 5. Pick an arbitrary profile
-        var profile = await SomeProfileIds(1);
-        return profile.First();
-    }
-    private static void InitLogging() {
-        Logging.Setup();
-        var config = LogManager.Configuration;
-        var consoleTarget = new NLog.Targets.ConsoleTarget("console") {
-            Layout = "${longdate} [${level:uppercase=true}] ${message:exception=false}"
-        };
-        config?.AddTarget(consoleTarget);
-        config?.LoggingRules.Add(new NLog.Config.LoggingRule("*", NLog.LogLevel.Debug, consoleTarget));
-        LogManager.Configuration = config;
+        var filedata = File.ReadAllText(filename);
+        return await AddServersFromText(filedata);
     }
 }
