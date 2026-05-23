@@ -228,7 +228,7 @@ public sealed class AppManager
         return await SQLiteHelper.Instance.QueryAsync<ProfileItemModel>(sql);
     }
 
-    public async Task<ProfileItem?> GetProfileItem(string indexId)
+    public async Task<ProfileItem?> GetProfileItem(string? indexId)
     {
         if (indexId.IsNullOrEmpty())
         {

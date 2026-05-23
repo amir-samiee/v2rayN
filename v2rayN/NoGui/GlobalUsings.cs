@@ -1,9 +1,5 @@
-global using ServiceLib.Handler.SysProxy;
 global using ServiceLib.Models.Entities;
-global using ServiceLib.Handler.Builder;
-global using ServiceLib.Models.Configs;
 global using ServiceLib.Models.Dto;
-global using ServiceLib.Services;
 global using ServiceLib.Handler;
 global using ServiceLib.Manager;
 global using ServiceLib.Helper;
