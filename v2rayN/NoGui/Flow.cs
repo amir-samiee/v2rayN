@@ -3,21 +3,25 @@ using ServiceLib.Common;
 using ServiceLib.Resx;
 using NoGui;
 using NLog;
-
 internal class Flow {
-    public static API api = new() { CoreUpdater = GetCustomCoreUpdater(), TrafficUpdater = GetCustomSpeedUpdater() };
+    // migrate updater-related attributes to a separate class
+    public static API api = new() { CoreUpdater = GetCustomCoreUpdater(), TrafficUpdater = GetCustomTrafficUpdater() };
     public static async Task Main() {
         Misc.ConLog("App Started");
         try {
             InitLogging();
             await api.Start(true);
+            await FetchFileForServers("servers.user");
+            await FetchFileForUrls("suburls.user");
             await ConfigHandler.SortServers(AppManager.Instance.Config, "", "Delay", false);
             await ConfigHandler.RemoveInvalidServerResult(API.Config, string.Empty);
-            Misc.ConLog("ordering & syncing DB...", "DB");
-            var exs = SQLiteHelper.Instance.TableAsync<ProfileExItem>().OrderBy(t => t.Delay);
-            Misc.ConLog((await exs.ToListAsync()).Count.ToString(), "DBStats");
+            Misc.ConLog("sorting & syncing DB...", "DB");
+            var exs = from extra in await SQLiteHelper.Instance.TableAsync<ProfileExItem>().ToListAsync()
+                      orderby extra.Delay
+                      select extra.IndexId;
+            Misc.ConLog(exs.ToList().Count.ToString(), "DBStats");
             Misc.ConLog("getting profiles in order...", "DB");
-            var profiles = await AppManager.Instance.GetProfileItemsByIndexIds(await AppManager.Instance.ProfileItemIndexes("") ?? []);
+            var profiles = await AppManager.Instance.GetProfileItemsByIndexIds(exs);
             Misc.ConLog(profiles.Count.ToString(), "DBStats");
             await api.SetProxyMode(ESysProxyType.Unchanged);
             await api.DeduplicateServers(null);
@@ -38,7 +42,7 @@ internal class Flow {
         Console.CancelKeyPress += (sender, e) => {
             breakFlag = true;
             e.Cancel = true;
-            Misc.ConLog("Tests cancelled; will stop the tests after currently active batch...");
+            Misc.ConLog("Tests cancelled; will stop the tests after currently active batch...", "tests");
         };
         var updater = new SpeedUpdateWrapper(api);
         for (var i = 0; i < chunks.Count; i++) {
@@ -59,41 +63,8 @@ internal class Flow {
             await api.ActivateProfile(sorted.First().IndexId);
         }
     }
-    private class SpeedUpdateWrapper(API? api = null) {
-        public API Api = api ?? new();
-        public bool Done = false;
-        private float LeastDelay = float.PositiveInfinity;
-        public async Task SpeedUpdater(SpeedTestResult result) {
-            var terminations = new List<string?> { ResUI.SpeedtestingCompleted, ResUI.SpeedtestingStop };
-            if (terminations.Contains(result.Delay)) {
-                Misc.ConLog(result.Delay);
-                Done = true;
-                return;
-            }
-            Misc.ConLog($"{result.IndexId}: {result.Delay}");
-            if (int.TryParse(result.Delay, out var delay)) {
-                if (delay < 0) { await Api.RemoveServer(result.IndexId); }
-                else if (delay < LeastDelay) {
-                    Misc.ConLog($"switching to a faster server (delay: {LeastDelay} > {delay})...", "config");
-                    LeastDelay = delay;
-                    await Api.ActivateProfile(result.IndexId);
-                }
-            }
-        }
-        public async Task Test(ESpeedActionType action, List<ProfileItem>? profiles) {
-            profiles ??= await SQLiteHelper.Instance.TableAsync<ProfileItem>().ToListAsync();
-            Api.SpeedUpdater = SpeedUpdater;
-            var sts = await Api.RunTest(action, profiles);
-            var i = 0;
-            while (!Done && i < 400) { await Task.Delay(1000); }
-            if (i == 400) {
-                Misc.ConLog("test operation completion timed out");
-                sts.ExitLoop();
-            }
-        }
-    }
-    private static Func<ServerSpeedItem, Task> GetCustomSpeedUpdater() {
-        var maxFormat = "max⇅ {0} KB";
+    private static Func<ServerSpeedItem, Task> GetCustomTrafficUpdater() {
+        var maxFormat = "max ⇅ {0} KB";
         var trafficFormat = "{0}: ↑ {1} KB/s ↓ {2} KB/s";
         string? maxId = null;
         long maxTraffic = 0;
@@ -115,7 +86,7 @@ internal class Flow {
             var trafficFmt = string.Format(maxFormat, maxTraffic);
             return string.Join("  |  ", proxyFmt, directFmt, trafficFmt);
         }
-        return async update => Misc.ConLog(await FormatUpdate(update), "stats");
+        return async update => Misc.ConLog(await FormatUpdate(update), "stats", true);
     }
     private static Func<bool, string, Task> GetCustomCoreUpdater() {
         return (_, msg) => {
@@ -133,14 +104,69 @@ internal class Flow {
         config?.LoggingRules.Add(new NLog.Config.LoggingRule("*", NLog.LogLevel.Debug, consoleTarget));
         LogManager.Configuration = config;
     }
+    private static async Task ActionOnFileContent(string filename, Func<string, Task<int>> func) {
+        // public static async Task FetchFileForUrls(string filename) {
+        try {
+            var status = await func(filename);
+            Misc.ConLog($"filename: {filename}  \tstatus: {status}", "status");
+        }
+        catch (Exception exc) {
+            Misc.ConLog("Operation unsuccessful");
+            Misc.ConLog(exc.StackTrace);
+            Misc.ConLog(exc.Message);
+        }
+    }
+    public static async Task FetchFileForServers(string filename) => await ActionOnFileContent(filename, api.AddServersFromText);
+    public static async Task FetchFileForUrls(string filename) {
+        await ActionOnFileContent(filename, async (s) => {
+            foreach (var line in File.ReadAllLines(s)) {
+                await api.AddSubFromUrl(line);
+            }
+            return 0;
+        });
+    }
+}
+internal class SpeedUpdateWrapper(API? api = null) {
+    public API Api = api ?? new();
+    public bool Done = false;
+    private float LeastDelay = float.PositiveInfinity;
+    public async Task SpeedUpdater(SpeedTestResult result) {
+        var terminations = new List<string?> { ResUI.SpeedtestingCompleted, ResUI.SpeedtestingStop };
+        if (terminations.Contains(result.Delay)) {
+            Misc.ConLog(result.Delay);
+            Done = true;
+            return;
+        }
+        Misc.ConLog($"{result.IndexId}: {result.Delay}");
+        if (int.TryParse(result.Delay, out var delay)) {
+            if (delay < 0) { await Api.RemoveServer(result.IndexId); }
+            else if (delay < LeastDelay) {
+                Misc.ConLog($"switching to a faster server (delay: {LeastDelay} > {delay})...", "config", true);
+                LeastDelay = delay;
+                await Api.ActivateProfile(result.IndexId);
+            }
+        }
+    }
+    public async Task Test(ESpeedActionType action, List<ProfileItem>? profiles) {
+        profiles ??= await SQLiteHelper.Instance.TableAsync<ProfileItem>().ToListAsync();
+        Api.SpeedUpdater = SpeedUpdater;
+        var sts = await Api.RunTest(action, profiles);
+        var i = 0;
+        while (!Done && i < 400) { await Task.Delay(1000); }
+        if (i == 400) {
+            Misc.ConLog("test operation completion timed out", "tests");
+            sts.ExitLoop();
+        }
+    }
 }
 internal static class Misc {
     private static string? prev = null;
-    public static void ConLog(string? msg, string? name = null) {
-        if (name is null) { msg = "\n" + msg; }
+    public static void ConLog(object? msg, string? name = null, bool overwrite = false) {
+        if (name is null || !overwrite) { msg = "\n" + msg; }
         else {
-            msg = (name == prev ? '\r' : '\n')
-        + $"{'[' + name + ']':>7}  {msg}  {"[/" + name + ']'}";
+            var encaps = name.IsNullOrEmpty() ? string.Empty : $"[{name}]";
+            msg = (name == prev && overwrite ? '\r' : '\n')
+        + $"{encaps}  {msg}  {encaps}";
         }
         Console.Write(msg);
         prev = name;

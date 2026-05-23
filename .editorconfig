@@ -65,7 +65,7 @@ csharp_style_expression_bodied_constructors = false:warning
 csharp_style_expression_bodied_indexers = when_on_single_line:warning
 csharp_style_expression_bodied_lambdas = when_on_single_line:warning
 csharp_style_expression_bodied_local_functions = false:warning
-csharp_style_expression_bodied_methods = false:warning
+csharp_style_expression_bodied_methods = false:suggestion
 csharp_style_expression_bodied_operators = false:warning
 csharp_style_expression_bodied_properties = when_on_single_line:warning
 csharp_style_pattern_matching_over_as_with_null_check = true:warning
@@ -177,3 +177,6 @@ dotnet_diagnostic.IDE0058.severity = suggestion
 
 # IDE0059: Unnecessary assignment of a value
 dotnet_diagnostic.IDE0059.severity = silent
+
+# IDE0022: Use block body for method
+dotnet_diagnostic.IDE0022.severity = suggestion

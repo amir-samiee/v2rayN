@@ -98,7 +98,7 @@ internal class API {
         sts.RunLoop(action, profiles);
         return sts;
     }
-    public async Task AddSubFromUrl(string url) { await ConfigHandler.AddSubItem(Config, url); }
+    public async Task<int> AddSubFromUrl(string url) { await ConfigHandler.AddSubItem(Config, url); return 0; }
     public async Task UpdateSubById(string id) {
         await SubscriptionHandler.UpdateProcess(Config, id, false, async (a, b) => { });
     }
