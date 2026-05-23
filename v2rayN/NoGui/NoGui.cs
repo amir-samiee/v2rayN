@@ -13,7 +13,7 @@ internal class API {
     public Func<ServerSpeedItem, Task> TrafficUpdater { get; set; } = async (a) => { };
     public Func<SpeedTestResult, Task> SpeedUpdater { get; set; } = async (a) => { };
     public Func<bool, string, Task> CoreUpdater { get; set; } = async (a, b) => { };
-    private static async Task<bool> InitAppManager(bool stats = true) {
+    private async Task<bool> InitAppManager(bool stats = true) {
         // 1. Bootstrap
         var init_app_success = AppManager.Instance.InitApp();
         if (!init_app_success) { return false; }
@@ -37,7 +37,7 @@ internal class API {
         // Sets up chmod on non-Windows; stores the update callback.
         await CoreManager.Instance.Init(Config, CoreUpdater);
     }
-    private static async Task<CoreConfigContextBuilderAllResult> BuildContext() {
+    private async Task<CoreConfigContextBuilderAllResult> BuildContext() {
         // 7. Resolve the active ProfileItem
         var profileItem = await Profile ?? throw new InvalidOperationException("Could not resolve default server.");
         // 8. Build the proxy config context
@@ -63,16 +63,16 @@ internal class API {
         }
         catch { await Stop(); throw; }
     }
-    public static async Task Stop() {
+    public async Task Stop() {
         // 11.
         await AppManager.Instance.AppExitAsync(true);
     }
-    public static async Task ActivateProfile(string? profileId) {
+    public async Task ActivateProfile(string? profileId) {
         // 6. Profile activation
         // Sets config.IndexId = targetId and persists config.json to disk.
         await ConfigHandler.SetDefaultServerIndex(Config, profileId);
     }
-    public static async Task SetProxyMode(ESysProxyType system_proxy_config = ESysProxyType.Unchanged, bool tun_mode = false) {
+    public async Task SetProxyMode(ESysProxyType system_proxy_config = ESysProxyType.Unchanged, bool tun_mode = false) {
         // 8.5. Handle the system proxy use status
         // ESysProxyType.Unchanged;                 // Option 1 – don't touch system proxy
         // ESysProxyType.ForcedChange;              // Option 2 – set system proxy → 127.0.0.1:<socks-port>
@@ -98,29 +98,31 @@ internal class API {
         sts.RunLoop(action, profiles);
         return sts;
     }
-    public static async Task AddSubFromUrl(string url) { await ConfigHandler.AddSubItem(Config, url); }
-    public static async Task UpdateSubById(string id) {
+    public async Task AddSubFromUrl(string url) { await ConfigHandler.AddSubItem(Config, url); }
+    public async Task UpdateSubById(string id) {
         await SubscriptionHandler.UpdateProcess(Config, id, false, async (a, b) => { });
     }
-    public static async Task UpdateAllSubs() {
+    public async Task UpdateAllSubs() {
         foreach (var item in await SQLiteHelper.Instance.TableAsync<SubItem>().ToListAsync()) {
             await UpdateSubById(item.Id);
         }
     }
-    public static async Task<int> DeduplicateServers(string? subid) {
+    public async Task<int> DeduplicateServers(string? subid) {
         var (a, b) = await ConfigHandler.DedupServerList(Config, subid ?? string.Empty);
         return a - b;
     }
-    public static async Task<int> AddServersFromText(string content) {
+    public async Task<int> AddServersFromText(string content) {
         return await ConfigHandler.AddBatchServers(Config, content, string.Empty, false);
     }
-    public static async Task RemoveServer(string? indexId) {
+    public async Task RemoveServer(string? indexId) {
         var profile = await AppManager.Instance.GetProfileItem(indexId);
+        var profileEx = await SQLiteHelper.Instance.TableAsync<ProfileExItem>().FirstAsync(t => t.IndexId == indexId);
         if (profile is not null) {
             await ConfigHandler.RemoveServers(Config, [profile]);
+            await SQLiteHelper.Instance.DeleteAsync(profileEx);
         }
     }
-    public static async Task<int> AddServersFromFile(string filename) {
+    public async Task<int> AddServersFromFile(string filename) {
         var filedata = File.ReadAllText(filename);
         return await AddServersFromText(filedata);
     }
