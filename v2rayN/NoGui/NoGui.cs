@@ -25,7 +25,6 @@ internal class API {
         return AppManager.Instance.InitComponents();
     }
     private async Task InitStatistics() {
-        Console.WriteLine("Enabling Statistics...");
         // 4. Init StatisticsManager
         // Spawns StatisticsXrayService  (polls http://127.0.0.1:{StatePort}/debug/vars)
         // and StatisticsSingboxService  (WebSocket ws://127.0.0.1:{StatePort2}/traffic)
@@ -39,15 +38,18 @@ internal class API {
     }
     private async Task<CoreConfigContextBuilderAllResult> BuildContext() {
         // 7. Resolve the active ProfileItem
-        var profileItem = await Profile ?? throw new InvalidOperationException("Could not resolve default server.");
+        var profileItem = await Profile ??
+        // new ProfileItem();
+        throw new InvalidOperationException("Could not resolve default server");
         // 8. Build the proxy config context
         // Resolves routing, DNS, inbound/outbound, stats API endpoint, optional pre-socks.
         var allResult = await CoreConfigContextBuilder.BuildAll(Config, profileItem);
-        if (!allResult.Success) { throw new InvalidOperationException("Config build failed."); }
+        if (!allResult.Success) { throw new InvalidOperationException("Context build failed."); }
         return allResult;
     }
     private async Task Initialize(bool enableStats) {
         await InitAppManager(enableStats);
+        // await ActivateProfile((await Profile)?.Id.ToString());
         await InitCoreManager();
         var allResult = await BuildContext();
         // 9. Write config.json → stop old core → start new core process
@@ -123,7 +125,7 @@ internal class API {
         }
     }
     public async Task<int> AddServersFromFile(string filename) {
-        var filedata = File.ReadAllText(filename);
+        var filedata = File.ReadAllText(filename, System.Text.Encoding.UTF8);
         return await AddServersFromText(filedata);
     }
 }
