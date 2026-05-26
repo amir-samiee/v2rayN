@@ -401,3 +401,4 @@ FodyWeavers.xsd
 *.sln.iml
 v2rayN/NoGui/GlobalUsings.cs
 .tmpcdrnr.python
+v2rayN/NoGui/Debug.cs

@@ -1,9 +1,10 @@
 using ServiceLib.Common;
-using NoGui;
 using NLog;
+namespace NoGui;
+
 internal class Flow {
     public static API api = new() { CoreUpdater = Updaters.CoreUpdater(), TrafficUpdater = Updaters.TrafficUpdater() };
-    public static async Task Main() {
+    public static async Task MainFlow() {
         Misc.ConLog("App Started");
         try {
             InitLogging();
@@ -18,22 +19,23 @@ internal class Flow {
         subid ??= string.Empty;
         var profiles = profileItems ?? await AppManager.Instance.ProfileItems(subid);
         var chunks = profiles?.Chunk(batchSize).ToList() ?? [];
-        // reason for batching is that doing all of it would neither
+        // the reason to batch is that doing all of it would neither
         // seem to work, nor keep the user regularly updated
-        var breakFlag = false;
+        var updater = new Updaters.SpeedWrapper(api);
+        var loopBreaker = false;
         Console.CancelKeyPress += (sender, e) => {
-            breakFlag = true;
+            loopBreaker = true;
             e.Cancel = true;
             Misc.ConLog("Tests cancelled; will stop the tests after currently active batch...", "tests");
         };
-        var updater = new Updaters.SpeedWrapper(api);
         for (var i = 0; i < chunks.Count; i++) {
-            updater.Done = false;
+            if (loopBreaker) { break; }
             var chunk = chunks[i].ToList();
             Misc.ConLog($"chunk {i + 1}/{chunks.Count} (batch size: {chunk.Count}/{batchSize})");
-            try { await updater.Test(action, chunk).WaitAsync(TimeSpan.FromSeconds(20)); }
-            catch (TimeoutException) { /* ignoreing for now */ }
-            if (breakFlag) { break; }
+            if (updater.skip) { updater.skip = false; continue; }
+            try { await updater.Test(action, chunk, true).WaitAsync(TimeSpan.FromSeconds(30)); }
+            catch (Exception) { Misc.ConLog("continueing due to timeout...", "tests"); updater.skip = false; continue; }
+            await Task.Delay(1000); // so that at the beginning of the test, it doesn't suddenly burst
         }
     }
     public static void InitLogging() {
@@ -43,7 +45,7 @@ internal class Flow {
             Layout = "${longdate} [${level:uppercase=true}] ${message:exception=false}"
         };
         config?.AddTarget(consoleTarget);
-        config?.LoggingRules.Add(new NLog.Config.LoggingRule("*", NLog.LogLevel.Debug, consoleTarget));
+        config?.LoggingRules.Add(new NLog.Config.LoggingRule("*", LogLevel.Debug, consoleTarget));
         LogManager.Configuration = config;
     }
 }

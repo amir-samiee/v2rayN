@@ -1,40 +1,52 @@
 using ServiceLib.Handler.Fmt;
-using ServiceLib.Resx;
+using ServiceLib.Common;
 using NoGui;
+using ServiceLib.Services;
 
 internal class Updaters {
-    internal class SpeedWrapper(API? api = null) {
-        public API Api = api ?? new();
-        public bool Done = false;
+    internal class SpeedWrapper(API? api = null, int maxRepetitions = 40) {
+        public API api = api ?? new();
+        public bool skip = false;
         private float LeastDelay = float.PositiveInfinity;
+        public int pending = 0;
+        private readonly int[] prevNRep = { -1, 0 }; // previous pendings count and its repetition's
+
+        /// <summary> returns whether the loop must be broken </summary>
+        private void HandleRepetition(int delay) {
+            if (delay == prevNRep[0]) { prevNRep[1] += 1; }
+            else { prevNRep[1] = 0; }
+            prevNRep[0] = delay;
+            if (prevNRep[1] >= maxRepetitions) { skip = true; }
+            Misc.ConLog($"pending: {pending}", "tests", true);
+        }
         public async Task SpeedUpdater(SpeedTestResult result) {
-            var terminations = new List<string?> { ResUI.SpeedtestingCompleted, ResUI.SpeedtestingStop };
-            if (terminations.Contains(result.Delay)) {
-                Misc.ConLog(result.Delay);
-                Done = true;
-                return;
-            }
-            Misc.ConLog($"{result.IndexId}: {result.Delay}");
             if (int.TryParse(result.Delay, out var delay)) {
-                if (delay < 0) {
-                    // await Api.RemoveServer(result.IndexId);
-                }
-                else if (delay < LeastDelay) {
+                pending -= 1;
+                HandleRepetition(delay);
+                Misc.ConLog($"{result.IndexId}: {result.Delay}");
+                if (delay < LeastDelay) {
                     Misc.ConLog($"switching to a faster server (delay: {LeastDelay} > {delay})...", "config", true);
                     LeastDelay = delay;
-                    await Api.ActivateProfile(result.IndexId);
+                    await api.ActivateProfile(result.IndexId);
                 }
             }
         }
-        public async Task Test(ESpeedActionType action, List<ProfileItem>? profiles) {
-            profiles ??= await SQLiteHelper.Instance.TableAsync<ProfileItem>().ToListAsync();
-            Api.SpeedUpdater = SpeedUpdater;
-            var sts = await Api.RunTest(action, profiles);
-            var i = 0;
-            while (!Done && i < 400) { await Task.Delay(1000); }
-            if (i == 400) {
-                Misc.ConLog("test operation completion timed out", "tests");
-                sts.ExitLoop();
+        public async Task Test(ESpeedActionType action, List<ProfileItem>? profiles, bool removeUnqualified = false) {
+            if (skip) { return; }
+            profiles ??= await AppManager.Instance.ProfileItems(string.Empty);
+            pending += profiles?.Count ?? throw new Exception();
+            api.SpeedUpdater = SpeedUpdater;
+            SpeedtestService? sts = null;
+            sts = await api.RunTest(action, profiles);
+            if (removeUnqualified) {
+                var pIds = from p in profiles select p.IndexId;
+                var timedouts = from px in await
+                                SQLiteHelper.Instance.
+                                TableAsync<ProfileExItem>().ToListAsync()
+                                where pIds.Contains(px.IndexId)
+                                where !(px.Delay > 0)
+                                select px.IndexId;
+                foreach (var id in timedouts) { await api.RemoveServer(id); }
             }
         }
     }
@@ -44,9 +56,7 @@ internal class Updaters {
         var trafficFormat = "{0}: ↑ {1} KB/s ↓ {2} KB/s";
         string? maxId = null;
         long maxTraffic = 0;
-        long Traffic(ServerSpeedItem update) {
-            return new long[] { update.ProxyUp, update.ProxyDown }.Sum();
-        }
+        long Traffic(ServerSpeedItem update) { return new long[] { update.ProxyUp, update.ProxyDown }.Sum(); }
         async Task<string> FormatUpdate(ServerSpeedItem update) {
             var proxyFmt = string.Format(trafficFormat, "proxy", update.ProxyUp, update.ProxyDown);
             var directFmt = string.Format(trafficFormat, "direct", update.DirectUp, update.DirectDown);

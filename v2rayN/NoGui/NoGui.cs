@@ -6,7 +6,7 @@ namespace NoGui;
 
 internal class API {
     public static Config Config =>
-    // ease of access + re-emphasize the singularity of these 
+    // ease of access + re-emphasize the singularity of this 
     // controversial unit config being passed everywhere
     AppManager.Instance.Config;
     public static Task<ProfileItem?> Profile => ConfigHandler.GetDefaultServer(Config);
@@ -39,7 +39,6 @@ internal class API {
     private async Task<CoreConfigContextBuilderAllResult> BuildContext() {
         // 7. Resolve the active ProfileItem
         var profileItem = await Profile ??
-        // new ProfileItem();
         throw new InvalidOperationException("Could not resolve default server");
         // 8. Build the proxy config context
         // Resolves routing, DNS, inbound/outbound, stats API endpoint, optional pre-socks.
@@ -49,7 +48,6 @@ internal class API {
     }
     private async Task Initialize(bool enableStats) {
         await InitAppManager(enableStats);
-        // await ActivateProfile((await Profile)?.Id.ToString());
         await InitCoreManager();
         var allResult = await BuildContext();
         // 9. Write config.json → stop old core → start new core process
@@ -100,15 +98,20 @@ internal class API {
         sts.RunLoop(action, profiles);
         return sts;
     }
-    public async Task<int> AddSubFromUrl(string url) { await ConfigHandler.AddSubItem(Config, url); return 0; }
-    public async Task UpdateSubById(string id) {
-        await SubscriptionHandler.UpdateProcess(Config, id, false, async (a, b) => { });
+    public async Task<int> AddSubFromUrl(string url, string? remarks = null) {
+        var name = remarks ?? Misc.FilePathShortName(url);
+        var sub = new SubItem() { Remarks = name, Url = url };
+        return await ConfigHandler.AddSubItem(Config, sub);
     }
-    public async Task UpdateAllSubs() {
-        foreach (var item in await SQLiteHelper.Instance.TableAsync<SubItem>().ToListAsync()) {
-            await UpdateSubById(item.Id);
+    /// <summary> pass null to update all subs </summary>
+    public async Task UpdateSubsByIds(List<string>? ids) {
+        foreach (var id in from sub in await SQLiteHelper.Instance.TableAsync<SubItem>().ToListAsync()
+                           where ids is null || ids.Contains(sub.Id)
+                           select sub.Id) {
+            await SubscriptionHandler.UpdateProcess(Config, id, false, async (a, b) => { });
         }
     }
+    /// <summary> returns the count of removed servers </summary>
     public async Task<int> DeduplicateServers(string? subid) {
         var (a, b) = await ConfigHandler.DedupServerList(Config, subid ?? string.Empty);
         return a - b;
@@ -116,13 +119,19 @@ internal class API {
     public async Task<int> AddServersFromText(string content) {
         return await ConfigHandler.AddBatchServers(Config, content, string.Empty, false);
     }
-    public async Task RemoveServer(string? indexId) {
+    public async Task<int> RemoveServer(string? indexId) {
         var profile = await AppManager.Instance.GetProfileItem(indexId);
         var profileEx = await SQLiteHelper.Instance.TableAsync<ProfileExItem>().FirstAsync(t => t.IndexId == indexId);
         if (profile is not null) {
-            await ConfigHandler.RemoveServers(Config, [profile]);
-            await SQLiteHelper.Instance.DeleteAsync(profileEx);
+            try {
+                await ConfigHandler.RemoveServers(Config, [profile]);
+                await SQLiteHelper.Instance.DeleteAsync(profileEx);
+            }
+            catch {
+                return -1;
+            }
         }
+        return 0;
     }
     public async Task<int> AddServersFromFile(string filename) {
         var filedata = File.ReadAllText(filename, System.Text.Encoding.UTF8);
