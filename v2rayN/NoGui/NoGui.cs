@@ -5,6 +5,7 @@ using ServiceLib.Services;
 namespace NoGui;
 
 internal class API {
+    public static readonly API api = new(); // to avoid unnecessary multiple non-customized instances
     public static Config Config =>
     // ease of access + re-emphasize the singularity of this 
     // controversial unit config being passed everywhere
@@ -13,7 +14,7 @@ internal class API {
     public Func<ServerSpeedItem, Task> TrafficUpdater { get; set; } = async (a) => { };
     public Func<SpeedTestResult, Task> SpeedUpdater { get; set; } = async (a) => { };
     public Func<bool, string, Task> CoreUpdater { get; set; } = async (a, b) => { };
-    private async Task<bool> InitAppManager(bool stats = true) {
+    private static async Task<bool> InitAppManager(bool stats = true) {
         // 1. Bootstrap
         var init_app_success = AppManager.Instance.InitApp();
         if (!init_app_success) { return false; }
@@ -36,7 +37,7 @@ internal class API {
         // Sets up chmod on non-Windows; stores the update callback.
         await CoreManager.Instance.Init(Config, CoreUpdater);
     }
-    private async Task<CoreConfigContextBuilderAllResult> BuildContext() {
+    private static async Task<CoreConfigContextBuilderAllResult> BuildContext() {
         // 7. Resolve the active ProfileItem
         var profileItem = await Profile ??
         throw new InvalidOperationException("Could not resolve default server");
@@ -63,16 +64,15 @@ internal class API {
         }
         catch { await Stop(); throw; }
     }
-    public async Task Stop() {
-        // 11.
+    public static async Task Stop() { // 11.
         await AppManager.Instance.AppExitAsync(true);
     }
-    public async Task ActivateProfile(string? profileId) {
+    public static async Task ActivateProfile(string? profileId) {
         // 6. Profile activation
         // Sets config.IndexId = targetId and persists config.json to disk.
         await ConfigHandler.SetDefaultServerIndex(Config, profileId);
     }
-    public async Task SetProxyMode(ESysProxyType system_proxy_config = ESysProxyType.Unchanged, bool tun_mode = false) {
+    public static async Task SetProxyMode(ESysProxyType system_proxy_config = ESysProxyType.Unchanged, bool tun_mode = false) {
         // 8.5. Handle the system proxy use status
         // ESysProxyType.Unchanged;                 // Option 1 – don't touch system proxy
         // ESysProxyType.ForcedChange;              // Option 2 – set system proxy → 127.0.0.1:<socks-port>
@@ -98,13 +98,13 @@ internal class API {
         sts.RunLoop(action, profiles);
         return sts;
     }
-    public async Task<int> AddSubFromUrl(string url, string? remarks = null) {
+    public static async Task<int> AddSubFromUrl(string url, string? remarks = null) {
         var name = remarks ?? Misc.FilePathShortName(url);
         var sub = new SubItem() { Remarks = name, Url = url };
         return await ConfigHandler.AddSubItem(Config, sub);
     }
     /// <summary> pass null to update all subs </summary>
-    public async Task UpdateSubsByIds(List<string>? ids) {
+    public static async Task UpdateSubsByIds(List<string>? ids) {
         foreach (var id in from sub in await SQLiteHelper.Instance.TableAsync<SubItem>().ToListAsync()
                            where ids is null || ids.Contains(sub.Id)
                            select sub.Id) {
@@ -112,14 +112,19 @@ internal class API {
         }
     }
     /// <summary> returns the count of removed servers </summary>
-    public async Task<int> DeduplicateServers(string? subid) {
+    public static async Task<int> DeduplicateServers(string? subid) {
         var (a, b) = await ConfigHandler.DedupServerList(Config, subid ?? string.Empty);
         return a - b;
     }
-    public async Task<int> AddServersFromText(string content) {
-        return await ConfigHandler.AddBatchServers(Config, content, string.Empty, false);
+    public static async Task<int> AddServersFromText(string content, bool atOnce = true) {
+        var chunks = atOnce ? [content] : content.Split();
+        foreach (var chunk in chunks) {
+            var stat = await ConfigHandler.AddBatchServers(Config, chunk, string.Empty, false);
+            if (stat is not 0) { return stat; }
+        }
+        return 0;
     }
-    public async Task<int> RemoveServer(string? indexId) {
+    public static async Task<int> RemoveServer(string? indexId) {
         var profile = await AppManager.Instance.GetProfileItem(indexId);
         var profileEx = await SQLiteHelper.Instance.TableAsync<ProfileExItem>().FirstAsync(t => t.IndexId == indexId);
         if (profile is not null) {
@@ -133,8 +138,8 @@ internal class API {
         }
         return 0;
     }
-    public async Task<int> AddServersFromFile(string filename) {
+    public static async Task<int> AddServersFromFile(string filename, bool atOnce = true) {
         var filedata = File.ReadAllText(filename, System.Text.Encoding.UTF8);
-        return await AddServersFromText(filedata);
+        return await AddServersFromText(filedata, atOnce);
     }
 }

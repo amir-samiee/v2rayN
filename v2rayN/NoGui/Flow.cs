@@ -3,17 +3,17 @@ using NLog;
 namespace NoGui;
 
 internal class Flow {
-    public static API api = new() { CoreUpdater = Updaters.CoreUpdater(), TrafficUpdater = Updaters.TrafficUpdater() };
+    public static API api = new() { CoreUpdater = Updaters.CoreUpdater(), TrafficUpdater = Updaters.Traffic.Main };
     public static async Task MainFlow() {
         Misc.ConLog("App Started");
         try {
             InitLogging();
-            await api.Start(true);
-            await api.SetProxyMode(ESysProxyType.Unchanged);
+            await api.Start();
+            await API.SetProxyMode(ESysProxyType.Unchanged);
             await TestCycle(ESpeedActionType.Tcping, batchSize: 64);
         }
         catch (Exception exc) { Misc.ConLog(exc.Message); Misc.ConLog(exc.StackTrace); }
-        finally { await api.Stop(); }
+        finally { await API.Stop(); }
     }
     public static async Task TestCycle(ESpeedActionType action, string? subid = null, int batchSize = 10, List<ProfileItem>? profileItems = null) {
         subid ??= string.Empty;
@@ -21,7 +21,7 @@ internal class Flow {
         var chunks = profiles?.Chunk(batchSize).ToList() ?? [];
         // the reason to batch is that doing all of it would neither
         // seem to work, nor keep the user regularly updated
-        var updater = new Updaters.SpeedWrapper(api);
+        var updater = new Updaters.Speed();
         var loopBreaker = false;
         Console.CancelKeyPress += (sender, e) => {
             loopBreaker = true;
@@ -31,11 +31,11 @@ internal class Flow {
         for (var i = 0; i < chunks.Count; i++) {
             if (loopBreaker) { break; }
             var chunk = chunks[i].ToList();
-            Misc.ConLog($"chunk {i + 1}/{chunks.Count} (batch size: {chunk.Count}/{batchSize})");
+            Misc.ConLog($"chunk {i + 1}/{chunks.Count} (batch size: {chunk.Count}/{batchSize})", "tests");
             if (updater.skip) { updater.skip = false; continue; }
-            try { await updater.Test(action, chunk, true).WaitAsync(TimeSpan.FromSeconds(30)); }
+            try { await updater.Test(action, chunk, true).WaitAsync(TimeSpan.FromSeconds(20)); }
             catch (Exception) { Misc.ConLog("continueing due to timeout...", "tests"); updater.skip = false; continue; }
-            await Task.Delay(1000); // so that at the beginning of the test, it doesn't suddenly burst
+            await Task.Delay(10500); // so that at the beginning of the test, it doesn't suddenly burst
         }
     }
     public static void InitLogging() {

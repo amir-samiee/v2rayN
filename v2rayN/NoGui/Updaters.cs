@@ -1,11 +1,8 @@
-using ServiceLib.Handler.Fmt;
-using ServiceLib.Common;
-using NoGui;
 using ServiceLib.Services;
+using NoGui;
 
 internal class Updaters {
-    internal class SpeedWrapper(API? api = null, int maxRepetitions = 40) {
-        public API api = api ?? new();
+    internal class Speed(int maxRepetitions = 40) {
         public bool skip = false;
         private float LeastDelay = float.PositiveInfinity;
         public int pending = 0;
@@ -19,15 +16,16 @@ internal class Updaters {
             if (prevNRep[1] >= maxRepetitions) { skip = true; }
             Misc.ConLog($"pending: {pending}", "tests", true);
         }
-        public async Task SpeedUpdater(SpeedTestResult result) {
+        public async Task Update(SpeedTestResult result) {
             if (int.TryParse(result.Delay, out var delay)) {
                 pending -= 1;
                 HandleRepetition(delay);
-                Misc.ConLog($"{result.IndexId}: {result.Delay}");
-                if (delay < LeastDelay) {
+                var rep = await AppManager.Instance.GetProfileItem(result.IndexId);
+                Misc.ConLog($"↪ {result.Delay + " ms",9} \tid: {rep?.IndexId,19} \tremarks: {rep?.Remarks}"); // ʋʊ⇉⇒
+                if (0 < delay && delay < LeastDelay) {
                     Misc.ConLog($"switching to a faster server (delay: {LeastDelay} > {delay})...", "config", true);
                     LeastDelay = delay;
-                    await api.ActivateProfile(result.IndexId);
+                    await API.ActivateProfile(result.IndexId);
                 }
             }
         }
@@ -35,7 +33,7 @@ internal class Updaters {
             if (skip) { return; }
             profiles ??= await AppManager.Instance.ProfileItems(string.Empty);
             pending += profiles?.Count ?? throw new Exception();
-            api.SpeedUpdater = SpeedUpdater;
+            var api = new API() { SpeedUpdater = Update };
             SpeedtestService? sts = null;
             sts = await api.RunTest(action, profiles);
             if (removeUnqualified) {
@@ -46,33 +44,35 @@ internal class Updaters {
                                 where pIds.Contains(px.IndexId)
                                 where !(px.Delay > 0)
                                 select px.IndexId;
-                foreach (var id in timedouts) { await api.RemoveServer(id); }
+                foreach (var id in timedouts) { await API.RemoveServer(id); }
             }
         }
     }
-
-    public static Func<ServerSpeedItem, Task> TrafficUpdater() {
-        var maxFormat = "max ⇅ {0} KB";
-        var trafficFormat = "{0}: ↑ {1} KB/s ↓ {2} KB/s";
-        string? maxId = null;
-        long maxTraffic = 0;
-        long Traffic(ServerSpeedItem update) { return new long[] { update.ProxyUp, update.ProxyDown }.Sum(); }
-        async Task<string> FormatUpdate(ServerSpeedItem update) {
+    internal class Traffic() {
+        private const string trafficFormat = "{0}: ↑ {1} KB/s ↓ {2} KB/s";
+        public static long Measure(ServerSpeedItem update) => update.ProxyUp + update.ProxyDown;
+        public static string Format(ServerSpeedItem update) {
             var proxyFmt = string.Format(trafficFormat, "proxy", update.ProxyUp, update.ProxyDown);
             var directFmt = string.Format(trafficFormat, "direct", update.DirectUp, update.DirectDown);
-            var traffic = Traffic(update);
-            if (traffic > maxTraffic) {
-                maxTraffic = traffic;
-                var profile = await AppManager.Instance.GetProfileItem(update.IndexId);
-                if (profile is not null && update.IndexId != maxId) {
-                    await File.AppendAllTextAsync("KBs.tmp", FmtHandler.GetShareUri(profile) + "\n");
-                }
-                maxId = update.IndexId;
-            }
-            var trafficFmt = string.Format(maxFormat, maxTraffic);
-            return string.Join("  |  ", proxyFmt, directFmt, trafficFmt);
+            return string.Join("  |  ", proxyFmt, directFmt);
         }
-        return async update => Misc.ConLog(await FormatUpdate(update), "stats", true);
+        public static async Task Log(ServerSpeedItem update) { Misc.ConLog(Format(update), "stats", true); }
+        private static ServerSpeedItem chosen = new() { ProxyDown = 0, ProxyUp = 0 };
+        private static async Task<bool> HandleSwitch(ServerSpeedItem update) {
+            ServerSpeedItem[] components = { update, chosen };
+            var sorted = from c in components
+                         orderby c.ProxyUp, c.ProxyDown
+                         select c;
+            var newChosen = sorted.Last();
+            var didChange = chosen.IndexId != newChosen.IndexId;
+            await API.ActivateProfile(newChosen.IndexId);
+            chosen = newChosen;
+            return didChange;
+        }
+        public static async Task Main(ServerSpeedItem update) {
+            await Log(update);
+            if (await HandleSwitch(update)) { Misc.ConLog("switched to a higher-rated profile based on traffic", "config"); }
+        }
     }
     public static Func<bool, string, Task> CoreUpdater() {
         return (_, msg) => {
